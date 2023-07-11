@@ -1,0 +1,14 @@
+version: '3.7'
+
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - 8000:8000
+    volumes:
+        - ./:/backend
+        - ./static:/static
+    command: daphne -b 0.0.0.0 -p 8000 backend.asgi:application
+    environment:
+      - DEBUG=1

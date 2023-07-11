@@ -1,0 +1,16 @@
+body {
+    background-color: hsl(0, 0%, 96%);
+  }
+
+.login-container{
+    margin: 100px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.mb-2 {
+    margin-right: auto;
+    margin-left: auto;
+    margin-bottom: 100px;
+}
