@@ -22,27 +22,28 @@ class GetGMJIConsumer(AsyncWebsocketConsumer):
           
           file += 'name mseed = ' + name + '\n'
           
-          lsts = get_GMJI_data_firebase(name)
+          lsts = get_GMJI_data_firebase(name) #data dari firebase yang sudah dipreprocessing
           sampling = int(lsts[0]['sampling_rate'])
-          s = 1/sampling
-          e = UTCDateTime(lsts[0]['starttime'])
+          s = 1/sampling # second
+          e = UTCDateTime(lsts[0]['starttime']) # bentuk data mseed, traces[0] = BHE, traces[1] = BHN, traces[2] = BHZ
           n = UTCDateTime(lsts[1]['starttime'])
           z = UTCDateTime(lsts[2]['starttime'])
           
-          lst, sensor_first = s_add_starttime(e, n, z, lsts)
-          starttime = UTCDateTime(lsts[0]['starttime_station']).datetime
+          lst, sensor_first = s_add_starttime(e, n, z, lsts) #penyelarasan data persensor gelombang
+          starttime = UTCDateTime(lsts[0]['starttime_station']).datetime # starttine station
           
-          lst_len_data = [len(lst[0]), len(lst[0]), len(lst[0])]
+          lst_len_data = [len(lst[0]), len(lst[0]), len(lst[0])] #SALAH BOIII
+          # lst_len_data = [len(lst[0]), len(lst[1]), len(lst[2])]
           lst_len_data.sort()
           
-          smallest = lst_len_data[0]
-          biggest = lst_len_data[2]
+          smallest = lst_len_data[0] # panjang data yang pertama mulai
+          biggest = lst_len_data[2] # panjang data yang terakhir mulai
 
           lst_time = []
           for j in range(biggest):
-            str_ = "".join(("0" + str(starttime.minute))[-2:] + ":" + ("0" + str(starttime.second))[-2:])
+            str_ = "".join(("0" + str(starttime.minute))[-2:] + ":" + ("0" + str(starttime.second))[-2:]) # ambil 2 digit menit dan dua digit detik
             lst_time.append(str_)
-            starttime += timedelta(microseconds=(1000/sampling)*1000)
+            starttime += timedelta(microseconds=(1000/sampling)*1000) # tambahin periode ke starttime
           str_p = None
           Ps = 0
           
@@ -197,7 +198,7 @@ class GetJAGIConsumer(AsyncWebsocketConsumer):
                   datas1 = lst[0][i-(30*sampling):i]
                   datas2 = lst[1][i-(30*sampling):i]
                   datas3 = lst[2][i-(30*sampling):i]
-                  p = get_Parrival(datas1, datas2, datas3, sampling)
+                  p = get_Parrival(datas1, datas2, datas3, sampling) # p_arrival (waktu dalam s?)
                   if p != -1:
                         p += i - (30*sampling)
                   else:

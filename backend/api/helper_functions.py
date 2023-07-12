@@ -63,13 +63,13 @@ def s_add_starttime(e, n, z, data):
     sample = data[0]['sampling_rate']
     
     l_diff = []
-    l_diff.append((l_enz[2][0], int(np.around((l_enz[2][1] - l_enz[0][1])*sample))))
+    l_diff.append((l_enz[2][0], int(np.around((l_enz[2][1] - l_enz[0][1])*sample)))) # isinya (e, banyak data yang perlu ditambahin di depan)
     l_diff.append((l_enz[1][0], int(np.around((l_enz[1][1] - l_enz[0][1])*sample))))
     l_diff.append((l_enz[0][0], 0))
     
     l_diff.sort()
     
-    data_e = split(data[0]['data_interpolated'])
+    data_e = split(data[0]['data_interpolated']) # data interpolated yang akan ditambahkan None di depan
     data_n = split(data[1]['data_interpolated'])
     data_z = split(data[2]['data_interpolated'])
     
@@ -87,7 +87,8 @@ def s_add_starttime(e, n, z, data):
     
     lst = [data_e, data_n, data_z]
     
-    return lst, l_enz[0][0]
+    return lst, l_enz[0][0] # [data], huruf yang pertama mulai
+
   
 def add_null_station(gmji, jagi, pwji):
   gmji = sorted(gmji, key= lambda a:a.stats.starttime)
