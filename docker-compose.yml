@@ -1,0 +1,61 @@
+version: '3'
+
+services:
+  mongodb-raw:
+    image: mongo
+    restart: always
+    ports:
+      - 27017:27017
+    volumes:
+      - ./data/mongodb-raw:/data/db
+
+  mongodb:
+    image: mongo
+    restart: always
+    ports:
+      - 27018:27017
+    volumes:
+      - ./data/mongodb:/data/db
+  
+  zookeeper:
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+      - "2181:2181/tcp"
+    volumes:
+      - ./data/zookeeper/data:/data
+      - ./data/zookeeper/data/datalog:/datalog
+
+  kafka:
+    restart: always
+    environment:
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_BROKER_ID: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_MESSAGE_MAX_BYTES: 5242880
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 5242880
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_JMX_PORT: 9101
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    volumes:
+      - ./data/kafka/data/kafka-1:/var/lib/kafka/data
+    depends_on:
+      - zookeeper
+  
+  kafka-ui:
+    image: provectuslabs/kafka-ui
+    container_name: kafka-ui
+    ports:
+      - "9080:8080"
+    restart: always
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
