@@ -2,6 +2,7 @@ from scipy.signal import butter, filtfilt, lfilter
 from obspy.signal.trigger import recursive_sta_lta, trigger_onset
 from obspy import UTCDateTime
 from datetime import datetime
+from pprint import pprint
 import numpy as np
 import pytz
 
@@ -32,7 +33,7 @@ def butter_bandpass(lowcut, highcut, fs, order):
 def butter_bandpass_filter(data, lowcut, highcut, fs, order):
   b, a = butter_bandpass(lowcut, highcut, fs, order=order)
   # y = lfilter(b, a, data)
-  y =filtfilt(b, a, data)
+  y = filtfilt(b, a, data)
   return y
 
 def get_Parrival(data1, data2, data3, sampling):

@@ -1,4 +1,3 @@
-RAW_TOPIC = 'raw'
-RAW_MSEED_TOPIC = 'raw-mseed'
 PREPROCESSED_TOPIC = 'preprocessed'
+P_ARRIVAL_TOPIC = 'p-arrival'
 PREDICTION_TOPIC = 'prediction'

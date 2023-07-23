@@ -5,8 +5,12 @@
 __pycache__/
 env*/
 db.sqlite3
+.env
+.vscode
 
 /data/
+/mseed/
+*.mseed
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 

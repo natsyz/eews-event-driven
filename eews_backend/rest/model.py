@@ -1,11 +1,14 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field
-
-class SeismometerModel(BaseModel):
+from pydantic import BaseModel, Field, ConfigDict
+        
+class UpdateStationModel(BaseModel):
     name: str = Field()
     description: Optional[str] = Field()
-    x: float = Field(...)
-    y: float = Field(...)
+    x: float = Field()
+    y: float = Field()
+    
+class StationModel(UpdateStationModel):
+    closest_stations: List[str] = Field()
     
 class MSeedData(BaseModel):
     network: Optional[str] = Field()

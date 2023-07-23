@@ -3,7 +3,7 @@ from collections.abc import Callable
 from confluent_kafka import Consumer, Producer
 from confluent_kafka import KafkaError
 from confluent_kafka import Message
-from eews_backend.utils.helper_functions import get_current_utc_datetime
+from utils.helper_functions import get_current_utc_datetime
 from typing import Dict
 from typing import Optional
 import logging

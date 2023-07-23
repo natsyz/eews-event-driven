@@ -1,14 +1,6 @@
 version: '3'
 
 services:
-  mongodb-raw:
-    image: mongo
-    restart: always
-    ports:
-      - 27017:27017
-    volumes:
-      - ./data/mongodb-raw:/data/db
-
   mongodb:
     image: mongo
     restart: always
@@ -16,6 +8,20 @@ services:
       - 27018:27017
     volumes:
       - ./data/mongodb:/data/db
+
+  influxdb:
+    image: influxdb
+    restart: always
+    ports:
+      - 8086:8086
+    volumes:
+      - ./data/influxdb:/var/lib/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: eews
+      DOCKER_INFLUXDB_INIT_PASSWORD: password
+      DOCKER_INFLUXDB_INIT_ORG: eews
+      DOCKER_INFLUXDB_INIT_BUCKET: eews
   
   zookeeper:
     restart: always
