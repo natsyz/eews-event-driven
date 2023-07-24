@@ -12,7 +12,7 @@ MONGO_DATABASE = os.getenv("MONGO_DATABASE") if os.getenv("MONGO_DATABASE") else
 client = motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = client[MONGO_DATABASE]
         
-def new_client():
+def mongo_client():
     mongo_url = MONGO_URL
     mongo_db = MONGO_DATABASE
     client = motor_asyncio.AsyncIOMotorClient(mongo_url)
