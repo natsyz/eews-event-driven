@@ -10,7 +10,7 @@ import About from "./pages/About";
 import { BrowserRouter as Router, Routes, Route} from 'react-router-dom'
 
 const App = () => {
-        return (
+    return (
         <Router>
         <Navibar/>
         <Routes>
@@ -21,6 +21,6 @@ const App = () => {
             <Route path='/help' element={<Help/>} />
         </Routes>
         </Router>
-        );
+    );
 };
 export default App;

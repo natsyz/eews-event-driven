@@ -138,6 +138,7 @@ width: 60px;
 }
 
 .station-title{
+  padding-top: 40px;
   padding-left: 40px; 
   font-size: 18px;
 }
