@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from typing import Dict, List
 from influxdb_client import Point, WritePrecision
 from obspy import read
+from logging.config import dictConfig
 
 from database.mongodb import *
 from database.influxdb import *
@@ -17,19 +18,22 @@ from stream_processing.topics import PREPROCESSED_TOPIC
 from utils import *
 from .model import *
 from .websocket import ConnectionManager
+from log_config import logging_config
 
-import faust
+import logging
 import haversine as hs
 import time
 import asyncio
 import pandas as pd
 
 MODULE_DIR = "./rest/"
-STATIC_DIR = "static"
+STATIC_DIR = "static/"
 
 load_dotenv()
+dictConfig(logging_config)
 
 app = FastAPI()
+log = logging.getLogger("rest")
 app.mount("/static", StaticFiles(directory=f"{MODULE_DIR}{STATIC_DIR}"), name="static")
 
 producer = KafkaProducer(PREPROCESSED_TOPIC)
@@ -71,6 +75,22 @@ HTML = """
     </body>
 </html>
 """
+@app.get("/test")
+async def test():
+    query_api = client.query_api()
+    now = datetime(2015,8,20,15,12,1)
+    query = f"""
+    from(bucket: "eews") 
+        |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
+        |> filter(fn: (r) => r["_measurement"] == "seismograf") 
+        |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
+    data: pd.DataFrame = query_api.query_data_frame(query=query)
+    # data = data.drop(columns=["_start", "_stop", "_field", "_measurement", "result", "table"])
+    # log.debug(data.columns)
+    # log.debug(data.head(50))
+    data = data.fillna(0)
+    return data.to_dict() 
+
 
 @app.get("/")
 async def get():
@@ -81,15 +101,19 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
+        now = datetime.now()
+        now = datetime(2015,8,20,15,12,1)
         while True:
             await asyncio.sleep(1)
-            now = datetime.now()
-            now = datetime(2015,8,20,15,12,1)
-            data: pd.DataFrame = query_api.query_data_frame(
-                query=f'from(bucket: "eews") |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) |> filter(fn: (r) => r["_measurement"] == "seismograf") |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")'
-            )
-            data = data.fillna(0)
+            query = f"""
+            from(bucket: "eews") 
+                |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
+                |> filter(fn: (r) => r["_measurement"] == "seismograf") 
+                |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
+            data: pd.DataFrame = query_api.query_data_frame(query=query)
+            log.debug(data)
             json_data = data.to_json()
+            now += timedelta(seconds=1)
             await manager.broadcast(json_data)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -97,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/station", response_model=List[StationModel])
 async def list_seismometer():
     list_data = await db["station"].find().to_list(1000000000)
-    print(list_data)
+    log.info(list_data)
     return list_data
 
 @app.get("/station/{name}", response_model=StationModel)
@@ -162,7 +186,7 @@ async def upload_mseed(file: UploadFile, background_tasks: BackgroundTasks):
 
 @measure_execution_time
 async def adjust_closest_stations(all_stations = None):
-    print("adjusting closest stations")
+    log.info("Adjusting closest stations")
     if not all_stations:
         all_stations = await db["station"].find().to_list(1000000000)
 
@@ -172,7 +196,7 @@ async def adjust_closest_stations(all_stations = None):
         station["closest_stations"] = calculate_closest_station(station, all_stations, calculated)
         await db["station"].update_one({"name": station["name"]}, {"$set": station})
         
-def calculate_closest_station(curr_station, all_stations, calculated = None):
+def calculate_closest_station(curr_station: List[Dict], all_stations: List[Dict], calculated: Dict = None):
     distances = []
     
     for other_station in all_stations:
@@ -191,24 +215,27 @@ def calculate_closest_station(curr_station, all_stations, calculated = None):
 
 @measure_execution_time
 def save_mseed(contents: bytes, filename: str):
-    print(f"{time.time_ns()} | saving mseed to db")
-    filepath = f"{STATIC_DIR}{filename}"
+    log.info("Saving mseed on the background")
+    filepath = f"{MODULE_DIR}{STATIC_DIR}{filename}"
     with open(filepath, "wb") as f:
         f.write(contents)
         
     records = []
     events = []
     traces = process_data(filepath)
+    start = time.monotonic_ns()
     for mseed_data in traces:
-        starttime = UTCDateTime(mseed_data['starttime']).datetime
+        starttime: datetime = UTCDateTime(mseed_data['starttime']).datetime
         endtime = UTCDateTime(mseed_data['endtime']).datetime
-        delta = float(mseed_data['delta'])
+        delta = 1/int(mseed_data['sampling_rate'])
         channel = mseed_data["channel"]
         station = mseed_data["station"]
-        start = time.monotonic_ns()
+        first_starttime = nearest_datetime_rounded(starttime, delta * 10**6)
         
-        for data_point in mseed_data['data_interpolated']:
-            point = Point("seismograf").time(starttime, write_precision=WritePrecision.MS).tag("channel", channel).tag("station", station).field("data", data_point)
+        log.debug(f"Processing {station}_{channel} from {filename} with len {len(mseed_data['data_interpolated'])}")
+        
+        for data_point in mseed_data['data_interpolated']: 
+            point = Point("seismograf").time(first_starttime, write_precision=WritePrecision.MS).tag("channel", channel).tag("station", station).field("data", data_point)
             records.append(point)      
             event = {
                 "station": station,
@@ -217,19 +244,21 @@ def save_mseed(contents: bytes, filename: str):
                 "data": data_point
             }
             events.append(event)
-            starttime += timedelta(seconds=delta)
+            first_starttime += timedelta(seconds=delta)
     
     with InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG) as client:
         with client.write_api() as writer:
+            log.debug("Start batch save to InfluxDB")
             writer.write(bucket="eews", record=records)
     
+    log.debug("Start producing events")
     for i in range(len(events)):    
         producer.produce_message(events[i])
     
-    print(f"finished process mseed with {len(records)} data for {(time.monotonic_ns() - start) / 10**9}s with rate of {len(records)/((time.monotonic_ns() - start) / 10**9)}")
+    log.debug(f"Finished process mseed with {len(records)} data for {(time.monotonic_ns() - start) / 10**9}s with rate of {len(records)/((time.monotonic_ns() - start) / 10**9)}")
 
 @measure_execution_time
-def process_data(mseed_filename):
+def process_data(mseed_filename: str):
     mseed_data = read(mseed_filename)
     traces = []
     for detail in mseed_data:
