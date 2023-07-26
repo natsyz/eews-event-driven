@@ -18,14 +18,14 @@ import {
 } from "firebase/firestore";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBEw9XRwGdr34Wpy20Ty_ETaotMMScrUHI",
-    authDomain: "ta-gempa.firebaseapp.com",
-    databaseURL: "https://ta-gempa-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "ta-gempa",
-    storageBucket: "ta-gempa.appspot.com",
-    messagingSenderId: "1048986403670",
-    appId: "1:1048986403670:web:2db3033eb7b16bbcf18cf7",
-    measurementId: "G-Q8HVW03MGS"
+  apiKey: "AIzaSyCSwOnYdU-ZegCPwy-0PiQMXHmRCl7ZMUQ",
+  authDomain: "eews-eventdriven.firebaseapp.com",
+  databaseURL: "https://eews-eventdriven-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "eews-eventdriven",
+  storageBucket: "eews-eventdriven.appspot.com",
+  messagingSenderId: "71764639429",
+  appId: "1:71764639429:web:52abe5dda01325824a3aac",
+  measurementId: "G-0Y2CMB63P1"
 };
 
 const app = initializeApp(firebaseConfig);

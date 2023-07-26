@@ -1,8 +1,10 @@
 from scipy.signal import butter, filtfilt, lfilter
 from obspy.signal.trigger import recursive_sta_lta, trigger_onset
 from obspy import UTCDateTime
+
 from database.mongodb import mongo_client
-from datetime import datetime
+from datetime import datetime, timedelta
+
 from pprint import pprint
 import numpy as np
 import pytz
@@ -165,3 +167,13 @@ def get_nearest_station(name, max_distance):
     coordinates = db['seismometer'].find_one({ 'name': name })['location']['coordinates']
     stations = db['seismometer'].find({ 'location': {'$nearSphere': {'$geometry': {'type': 'Point', 'coordinates': coordinates}, '$maxDistance': max_distance}}}, {'name': 1, '_id': 0})
     return names if len(names:=[station['name'] for station in stations]) <= 3 else names[:3]
+  
+def nearest_datetime_rounded(datetime: datetime, step_in_micros: int = 40000):
+    microsecond = datetime.time().microsecond
+    remainder = microsecond % step_in_micros
+    rounded = datetime
+    if remainder < (step_in_micros / 2):
+        rounded -= timedelta(microseconds=remainder)
+    else:
+        rounded += timedelta(microseconds=(step_in_micros - remainder))
+    return rounded
