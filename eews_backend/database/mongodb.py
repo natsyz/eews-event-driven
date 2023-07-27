@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from motor import motor_asyncio
 from typing import Optional
+from pymongo import MongoClient
 import os
 
 load_dotenv()
@@ -16,5 +17,12 @@ def mongo_client():
     mongo_url = MONGO_URL
     mongo_db = MONGO_DATABASE
     client = motor_asyncio.AsyncIOMotorClient(mongo_url)
+    db = client[mongo_db]
+    return client, db
+
+def mongo_client_sync():
+    mongo_url = MONGO_URL
+    mongo_db = MONGO_DATABASE
+    client = MongoClient(mongo_url)
     db = client[mongo_db]
     return client, db
