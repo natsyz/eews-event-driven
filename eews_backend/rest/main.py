@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, timezone
 from math import ceil
 from dotenv import load_dotenv
 from fastapi import (
@@ -13,7 +13,6 @@ from fastapi import (
 )
 from fastapi.params import Body
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.staticfiles import StaticFiles
 from typing import Dict, List
 from influxdb_client import Point, WritePrecision
@@ -33,16 +32,20 @@ import haversine as hs
 import time
 import asyncio
 import pandas as pd
-
-MODULE_DIR = "./rest/"
-STATIC_DIR = "static/"
+import io
 
 load_dotenv()
 dictConfig(logging_config)
 
+MODULE_DIR = "./rest/"
+STATIC_DIR = "static/"
+SIMULATE_REALTIME = True if os.getenv("SIMULATE_REALTIME") == "True" else False
+
+
 app = FastAPI()
 log = logging.getLogger("rest")
 app.mount("/static", StaticFiles(directory=f"{MODULE_DIR}{STATIC_DIR}"), name="static")
+log.info(f"{SIMULATE_REALTIME=}")
 
 producer = KafkaProducer(PREPROCESSED_TOPIC)
 manager = ConnectionManager()
@@ -95,7 +98,9 @@ async def test():
         |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
         |> filter(fn: (r) => r["_measurement"] == "seismograf") 
         |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
+    start = time.monotonic_ns()
     data: pd.DataFrame = query_api.query_data_frame(query=query)
+    log.debug(f"{(time.monotonic_ns() - start)/10**9}s")
     # data = data.drop(columns=["_start", "_stop", "_field", "_measurement", "result", "table"])
     # log.debug(data.columns)
     # log.debug(data.head(50))
@@ -113,32 +118,34 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc) - timedelta(seconds=10)
         # now = datetime(2015, 8, 20, 15, 12, 1)
         while True:
-            await asyncio.sleep(1)
+            start = time.monotonic_ns()
             query = f"""
             from(bucket: "eews") 
-                |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
+                |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
                 |> filter(fn: (r) => r["_measurement"] == "seismograf") 
                 |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
             data: pd.DataFrame = query_api.query_data_frame(query=query)
-            time_list = [
-                _time.isoformat(sep=" ", timespec="microseconds")[:-6]
-                for _time in data["_time"].to_list()
-            ]
-            for i in range(25):
-                timestamp = (
-                    now + timedelta(seconds=(i * 0.04)) - timedelta(seconds=1)
-                ).isoformat(sep=" ", timespec="microseconds")
-                if timestamp not in time_list:
-                    print(timestamp, time_list)
-                    # data.add(pd.DataFrame())
-
+            # time_list = [
+            #     _time.isoformat(sep=" ", timespec="microseconds")[:-6]
+            #     for _time in data["_time"].to_list()
+            # ]
+            # for i in range(25):
+            #     timestamp = (
+            #         now + timedelta(seconds=(i * 0.04)) - timedelta(seconds=1)
+            #     ).isoformat(sep=" ", timespec="microseconds")
+            #     if timestamp not in time_list:
+            #         print(timestamp, time_list)
+            #         # data.add(pd.DataFrame())
+            log.debug(now)
             log.debug(data)
             json_data = data.to_json()
             now += timedelta(seconds=1)
             await manager.broadcast(json_data)
+            diff = (time.monotonic_ns() - start) / 10**9
+            await asyncio.sleep(1 - diff)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
@@ -227,6 +234,7 @@ async def delete_seismometer(name: str, background_task: BackgroundTasks):
 @app.post("/mseed", status_code=status.HTTP_201_CREATED)
 async def upload_mseed(file: UploadFile, background_tasks: BackgroundTasks):
     filename = file.filename
+    log.debug(f"Received mseed with name {filename}")
     contents = await file.read()
     background_tasks.add_task(save_mseed, contents, filename)
     return {"file_size": file.size, "filename": filename}
@@ -273,17 +281,15 @@ def calculate_closest_station(
 @measure_execution_time
 def save_mseed(contents: bytes, filename: str):
     log.info("Saving mseed on the background")
-    filepath = f"{MODULE_DIR}{STATIC_DIR}{filename}"
-    with open(filepath, "wb") as f:
-        f.write(contents)
 
     records = []
     events = []
-    traces = process_data(filepath)
+    traces = process_data(io.BytesIO(contents))
     start = time.monotonic_ns()
     for mseed_data in traces:
         starttime: datetime = UTCDateTime(mseed_data["starttime"]).datetime
-        endtime = UTCDateTime(mseed_data["endtime"]).datetime
+        if SIMULATE_REALTIME:
+            starttime = (UTCDateTime().now() - 10).datetime
         delta = 1 / int(mseed_data["sampling_rate"])
         channel = mseed_data["channel"]
         station = mseed_data["station"]
