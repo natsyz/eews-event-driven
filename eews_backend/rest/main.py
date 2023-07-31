@@ -14,13 +14,14 @@ from fastapi import (
 from fastapi.params import Body
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List
 from influxdb_client import Point, WritePrecision
 from obspy import read
 from logging.config import dictConfig
 
-from database.mongodb import *
-from database.influxdb import *
+from database.mongodb import mongo_client
+from database.influxdb import influx_client
 from stream import KafkaProducer, PREPROCESSED_TOPIC
 from utils import *
 from .model import *
@@ -33,6 +34,7 @@ import time
 import asyncio
 import pandas as pd
 import io
+import os
 
 load_dotenv()
 dictConfig(logging_config)
@@ -41,14 +43,30 @@ MODULE_DIR = "./rest/"
 STATIC_DIR = "static/"
 SIMULATE_REALTIME = True if os.getenv("SIMULATE_REALTIME") == "True" else False
 
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
 
 app = FastAPI()
 log = logging.getLogger("rest")
 app.mount("/static", StaticFiles(directory=f"{MODULE_DIR}{STATIC_DIR}"), name="static")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 log.info(f"{SIMULATE_REALTIME=}")
 
 producer = KafkaProducer(PREPROCESSED_TOPIC)
 manager = ConnectionManager()
+_, db = mongo_client()
+client = influx_client()
 
 HTML = """
 <!DOCTYPE html>
@@ -101,9 +119,6 @@ async def test():
     start = time.monotonic_ns()
     data: pd.DataFrame = query_api.query_data_frame(query=query)
     log.debug(f"{(time.monotonic_ns() - start)/10**9}s")
-    # data = data.drop(columns=["_start", "_stop", "_field", "_measurement", "result", "table"])
-    # log.debug(data.columns)
-    # log.debug(data.head(50))
     data = data.fillna(0)
     return data.to_dict()
 
@@ -118,13 +133,14 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
-        now = datetime.now(tz=timezone.utc) - timedelta(seconds=10)
-        # now = datetime(2015, 8, 20, 15, 12, 1)
+        now = datetime(2015, 8, 20, 15, 12, 1)
+        if SIMULATE_REALTIME:
+            now = datetime.now(tz=timezone.utc) - timedelta(seconds=10)
         while True:
             start = time.monotonic_ns()
             query = f"""
             from(bucket: "eews") 
-                |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
+                |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
                 |> filter(fn: (r) => r["_measurement"] == "seismograf") 
                 |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
             data: pd.DataFrame = query_api.query_data_frame(query=query)
@@ -153,7 +169,6 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/station", response_model=List[StationModel])
 async def list_seismometer():
     list_data = await db["station"].find().to_list(1000000000)
-    log.info(list_data)
     return list_data
 
 
@@ -317,12 +332,9 @@ def save_mseed(contents: bytes, filename: str):
             events.append(event)
             first_starttime += timedelta(seconds=delta)
 
-    with InfluxDBClient(
-        url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG
-    ) as client:
-        with client.write_api() as writer:
-            log.debug("Start batch save to InfluxDB")
-            writer.write(bucket="eews", record=records)
+    with client.write_api() as writer:
+        log.debug("Start batch save to InfluxDB")
+        writer.write(bucket="eews", record=records)
 
     log.debug("Start producing events")
     for i in range(len(events)):
