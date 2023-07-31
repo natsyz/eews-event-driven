@@ -5,24 +5,27 @@ import time
 import os
 import shutil
 import threading
+import multiprocessing
 
 MSEED_FOLDER = "eews_backend/mseed/"
 SOURCE_MSEED = "eews_backend/generator/20150920_151412.mseed"
 REST_URL = "http://127.0.0.1:8000"
 MSEED_RANGE_IN_SECONDS = 10
 
+global process_list
+process_list = []
+
 
 def main():
     split_mseed()
-
+    global process_list
     print("Start sending file to", REST_URL)
-    threads = []
     for station in os.listdir(MSEED_FOLDER):
-        send_thread = threading.Thread(target=send, args=(station,))
-        send_thread.name = station
-        threads.append(send_thread)
-    for thread in threads:
-        thread.start()
+        send_process = multiprocessing.Process(target=send, args=(station,))
+        send_process.name = station
+        process_list.append(send_process)
+    for process in process_list:
+        process.start()
 
 
 def send(station: str):
@@ -73,4 +76,9 @@ def split_mseed():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        for process in process_list:
+            process.terminate()
+            process.join()
