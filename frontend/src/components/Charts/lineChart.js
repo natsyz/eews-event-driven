@@ -1,6 +1,7 @@
 import { useEffect, useState,useRef } from 'react';
 import React from 'react';
 import {
+  Label,
   Line,
   LineChart,
   XAxis,
@@ -49,15 +50,24 @@ const RealtimeChart = (props) => {
       Object.entries(value).forEach(([index, point]) => {
         let points = mappedData[index] != undefined ? mappedData[index] : {}
         points[key] = point
-        points["time"] = props.time[index]
+        points["time"] =  new Date(props.time[index]).toLocaleTimeString()
         mappedData[index] = points
       })
     })
 
     setData((prev) => [...prev.slice(25), ...mappedData])
-    console.log(mappedData)
   
   }, [props]);
+
+  function yAxisFormatter(y) {
+    if (y > 0) {
+      return y/y
+    } else if (y == 0) {
+      return 0
+    } else {
+      return -(y/y)
+    }
+  }
 
   return (
     <div data-testid = {props.testid} className='responsive-container'>
@@ -65,19 +75,17 @@ const RealtimeChart = (props) => {
       <div data-testid={props.testid} className='flex-container'>
         <ResponsiveContainer height="100%" width="100%">
           <LineChart width={650} height={350} data={data}>
-            <XAxis dataKey="time" xAxisId={0} axisLine={true} tick={true} tickLine={true}/>
-            <XAxis dataKey="time" xAxisId={1} axisLine={false} tick={false} tickLine={false}/>
-            <YAxis domain={[-1, 1]}/>
+            <XAxis dataKey="time" xAxisId={0} axisLine={true} tick={true} tickLine={true} angle={-45}  padding="gap"/>
+            <XAxis dataKey="x" xAxisId={1} axisLine={false} tick={false} tickLine={false}/>
+            <YAxis type='number' domain={[-1000, 1000]} tickCount={3} tickFormatter={yAxisFormatter}/>
             <ReferenceLine x={p} stroke="red" xAxisId={1} />
             <Line type="linear" isAnimationActive={false} dataKey="BHN" stroke="#8884d8" dot={false}/>
             <Line type="linear" isAnimationActive={false} dataKey="BHZ" stroke="#82ca9d" dot={false}/>
             <Line type="linear" isAnimationActive={false} dataKey="BHE" stroke="#ffc658" dot={false}/>
           </LineChart>
         </ResponsiveContainer>
-        
       </div>
     </div>
-    
   );
 };
 export default RealtimeChart
