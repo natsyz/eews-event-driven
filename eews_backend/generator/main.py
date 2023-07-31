@@ -60,7 +60,8 @@ def split_mseed():
     print("Mseed will be saved to folder", MSEED_FOLDER)
     print("Splitting mseed")
     st: Stream = read(SOURCE_MSEED)
-    dt = UTCDateTime("2015-08-20T15:12:00")
+    first_starttime = min([trace.stats["starttime"] for trace in st])
+    dt = UTCDateTime(first_starttime)
     last_endtime = max([trace.stats["endtime"] for trace in st])
     trace: Trace
     shutil.rmtree(MSEED_FOLDER)
