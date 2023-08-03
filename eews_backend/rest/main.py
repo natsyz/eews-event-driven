@@ -109,18 +109,20 @@ HTML = """
 @app.get("/test")
 async def test():
     query_api = client.query_api()
-    now = datetime(2015, 8, 20, 15, 12, 1)
+    now = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
     first_starttime = now
     query = f"""
     from(bucket: "eews") 
-        |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
+        |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
         |> filter(fn: (r) => r["_measurement"] == "seismograf") 
         |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
     start = time.monotonic_ns()
     data: pd.DataFrame = query_api.query_data_frame(query=query)
+    log.debug(data)
+    extended_data = fill_empty_timestamp((now - timedelta(seconds=1)), now, data)
+    print(extended_data)
     log.debug(f"{(time.monotonic_ns() - start)/10**9}s")
-    data = data.fillna(0)
-    return data.to_dict()
+    return extended_data.to_dict()
 
 
 @app.get("/")
@@ -133,36 +135,29 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
-        now = datetime(2015, 8, 20, 15, 12, 1)
+        now = datetime(2015, 8, 20, 15, 12, 1, tzinfo=timezone.utc)
         if SIMULATE_REALTIME:
             now = datetime.now(tz=timezone.utc) - timedelta(seconds=10)
         while True:
             start = time.monotonic_ns()
             query = f"""
             from(bucket: "eews") 
-                |> range(start: {(now - timedelta(seconds=1)).isoformat()}Z, stop: {now.isoformat()}Z) 
+                |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
                 |> filter(fn: (r) => r["_measurement"] == "seismograf") 
                 |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
             data: pd.DataFrame = query_api.query_data_frame(query=query)
-            # time_list = [
-            #     _time.isoformat(sep=" ", timespec="microseconds")[:-6]
-            #     for _time in data["_time"].to_list()
-            # ]
-            # for i in range(25):
-            #     timestamp = (
-            #         now + timedelta(seconds=(i * 0.04)) - timedelta(seconds=1)
-            #     ).isoformat(sep=" ", timespec="microseconds")
-            #     if timestamp not in time_list:
-            #         print(timestamp, time_list)
-            #         # data.add(pd.DataFrame())
+            extended_data = fill_empty_timestamp(
+                (now - timedelta(seconds=1)), now, data
+            )
             log.debug(now)
             log.debug(data)
-            json_data = data.to_json()
+            json_data = extended_data.to_json()
             now += timedelta(seconds=1)
             await manager.broadcast(json_data)
             diff = (time.monotonic_ns() - start) / 10**9
             await asyncio.sleep(1 - diff)
-    except WebSocketDisconnect:
+    except Exception:
+        log.warning(f"Client {websocket} has been disconnected")
         manager.disconnect(websocket)
 
 
@@ -338,7 +333,9 @@ def save_mseed(contents: bytes, filename: str):
 
     log.debug("Start producing events")
     for i in range(len(events)):
-        producer.produce_message(events[i])
+        producer.produce_message(
+            events[i], f"{events[i]['channel']}_{events[i]['station']}"
+        )
 
     log.debug(
         f"Finished process mseed with {len(records)} data for {(time.monotonic_ns() - start) / 10**9}s with rate of {len(records)/((time.monotonic_ns() - start) / 10**9)}"

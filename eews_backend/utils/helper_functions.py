@@ -3,8 +3,11 @@ from obspy.signal.trigger import recursive_sta_lta, trigger_onset
 from obspy import UTCDateTime
 from datetime import datetime, timedelta
 from pprint import pprint
+import pandas as pd
 import numpy as np
 import pytz
+
+from .wrapper import measure_execution_time
 
 
 def normalizations(array):
@@ -200,3 +203,25 @@ def nearest_datetime_rounded(datetime: datetime, step_in_micros: int = 40000):
     else:
         rounded += timedelta(microseconds=(step_in_micros - remainder))
     return rounded
+
+
+@measure_execution_time
+def fill_empty_timestamp(
+    start: datetime,
+    end: datetime,
+    data: pd.DataFrame,
+    data_key: str = "_time",
+    step_in_micros: int = 40000,
+) -> pd.DataFrame:
+    diff = end - start
+    diff_in_micros = (diff.seconds * 10**6) + (diff.microseconds)
+    time_list = set(
+        [
+            (start + timedelta(microseconds=i))
+            for i in range(0, diff_in_micros, step_in_micros)
+        ]
+    )
+    time_in_data = set([_time for _time in data[data_key].to_list()])
+    time_not_in_data = pd.DataFrame(list(time_list - time_in_data), columns=[data_key])
+    extended_data = pd.concat([data, time_not_in_data], ignore_index=True)
+    return extended_data.sort_values(by=["_time"], ignore_index=True).fillna(0)
