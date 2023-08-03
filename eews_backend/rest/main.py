@@ -321,7 +321,7 @@ def save_mseed(contents: bytes, filename: str):
             event = {
                 "station": station,
                 "channel": channel,
-                "time": str(starttime),
+                "time": f"{first_starttime.isoformat()}Z",
                 "data": data_point,
             }
             events.append(event)
