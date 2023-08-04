@@ -1,3 +1,4 @@
+from tensorflow.keras.models import load_model
 import numpy as np
 import pandas as pd
 import pickle
@@ -15,7 +16,8 @@ class Predictor():
         return cls._instance
     
     def __init__(self):
-        self.model = pickle.load(open('predict\model\model.pkl', 'rb'))
+        # self.model = pickle.load(open('predict\model\model.pkl', 'rb'))
+        self.model = load_model('predict\model\model.h5')
 
     def predict(self, data):
         predictions = self.model.predict(np.array(data), batch_size=4)
