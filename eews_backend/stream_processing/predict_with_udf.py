@@ -54,6 +54,7 @@ def apply_prediction(station, time, config):
     from pymongo import MongoClient
     import numpy as np
     import pandas as pd
+    import pause
     
     def read_seis_influx(stations, time):
         # Init influx
@@ -136,6 +137,7 @@ def apply_prediction(station, time, config):
     stations = names if len(names:=[station["name"] for station in stations]) <= 3 else names[:3]
 
     # Get each station data from Influx
+    pause.until(datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ") + datetime.timedelta(seconds=10))
     influx_data = read_seis_influx(stations, datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ"))
 
     # Preprocess (interpolation and transformation) data

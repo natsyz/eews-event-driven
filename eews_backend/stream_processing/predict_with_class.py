@@ -12,6 +12,7 @@ import pandas as pd
 
 import datetime
 import json
+import pause
 import yaml
 
 
@@ -55,6 +56,7 @@ class Predict:
         stations = names if len(names:=[station["name"] for station in stations]) <= 3 else names[:3]
 
         # Get each station data from Influx
+        pause.until(datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ") + datetime.timedelta(seconds=10))
         influx_data = self.read_seis_influx(stations, datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ"))
         
         # Preprocess (interpolation and transformation) data

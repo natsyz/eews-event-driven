@@ -1,11 +1,13 @@
-import datetime
 from database.influxdb import *
 from database.mongodb import mongo_client_sync
-from dotenv import load_dotenv
 from stream_processing.kafka import KafkaConsumer, KafkaProducer
 from stream_processing.topics import P_ARRIVAL_TOPIC, PREDICTION_TOPIC
 from predict.predictor import Predictor
 from utils.helper_functions import letInterpolate, denormalization
+
+from dotenv import load_dotenv
+import datetime
+import pause
 
 load_dotenv()
 
@@ -27,6 +29,7 @@ def main(msg):
     stations = get_nearest_station(msg["station"], 200000)
 
     # Get each station data from Influx
+    pause.until(datetime.datetime.strptime(msg["time"], "%Y-%m-%dT%H:%M:%S.%fZ") + datetime.timedelta(seconds=10))
     influx_data = read_seis_influx(stations, datetime.datetime.strptime(msg["time"],'%Y-%m-%dT%H:%M:%S.%fZ'))
     
     # Preprocess (interpolation and transformation) data
@@ -50,8 +53,8 @@ def main(msg):
     producer.produce_message({"id": str(pred_id)})
 
 def read_seis_influx(stations: str, time: datetime.datetime):
-    start_time = (time - datetime.timedelta(0,5)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-    stop_time = (time + datetime.timedelta(0,5)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    start_time = (time - datetime.timedelta(0,10)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    stop_time = (time + datetime.timedelta(0,10)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     query = f"""from(bucket: "eews")
     |> range(start: {start_time}, stop: {stop_time})
