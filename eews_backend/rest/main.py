@@ -42,7 +42,7 @@ dictConfig(logging_config)
 
 MODULE_DIR = "./rest/"
 STATIC_DIR = "static/"
-SIMULATE_REALTIME = True if os.getenv("SIMULATE_REALTIME") == "True" else False
+SIMULATE_REALTIME = False if os.getenv("SIMULATE_REALTIME") == "False" else True
 MSEED_RANGE_IN_SECONDS = 30
 
 origins = [
@@ -317,37 +317,23 @@ def save_mseed(contents: bytes, filename: str):
 
 @measure_execution_time
 def produce_windowed_data(stream: Stream, first_starttime, first_endtime):
-    dt = UTCDateTime(first_starttime)
+    rounded_starttime = nearest_datetime_rounded(first_starttime, 0.04 * 10**6)
+    dt = UTCDateTime(rounded_starttime)
+
+    log.info("Producing windowed events to kafka")
 
     while dt + 8 <= first_endtime:
-        windowed_data = [None, None, None]
         trimmed = stream.slice(dt, dt + 8, keep_empty_traces=True)
         if len(trimmed) > 0:
             event = {
                 "station": trimmed[0].stats["station"],
             }
             for detail in trimmed:
-                if detail.stats["channel"] == "BHE":
-                    windowed_data[0] = detail.data
-                    event["BHE"] = {
-                        "starttime": str(detail.stats.starttime),
-                        "endtime": str(detail.stats.endtime),
-                        "data": detail.data.tolist(),
-                    }
-                elif detail.stats["channel"] == "BHN":
-                    windowed_data[1] = detail.data
-                    event["BHN"] = {
-                        "starttime": str(detail.stats.starttime),
-                        "endtime": str(detail.stats.endtime),
-                        "data": detail.data.tolist(),
-                    }
-                elif detail.stats["channel"] == "BHZ":
-                    windowed_data[2] = detail.data
-                    event["BHZ"] = {
-                        "starttime": str(detail.stats.starttime),
-                        "endtime": str(detail.stats.endtime),
-                        "data": detail.data.tolist(),
-                    }
+                event[detail.stats["channel"]] = {
+                    "starttime": str(detail.stats.starttime),
+                    "endtime": str(detail.stats.endtime),
+                    "data": detail.data.tolist(),
+                }
             producer.produce_message(event, event["station"])
         dt += 0.04
     return dt

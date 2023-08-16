@@ -28,6 +28,7 @@ class Seedlink:
         channels: str = "BH*",
         buffer_size: int = 9,
         poll_interval: int = 30,
+        override_station: str | None = None,
     ) -> None:
         self.buffer = []
         self.buffer_size = buffer_size
@@ -38,7 +39,7 @@ class Seedlink:
 
         self.geofon_client = client = Client("GEOFON")
         self.inventory = client.get_stations(
-            network="*",
+            network="GE",
             station="*",
             starttime="2011-03-11T00:00:00",
             endtime="2018-03-11T00:00:00",
@@ -47,6 +48,7 @@ class Seedlink:
         self.seedlink_client = SeedlinkClient("geofon.gfz-potsdam.de", 18000)
         self.influx_client = influx_client()
         self.producer = KafkaProducer(PREPROCESSED_TOPIC)
+        self.override_station = override_station
 
     def start(self):
         # Set the start and end times for the plot
@@ -60,6 +62,12 @@ class Seedlink:
             st = self.seedlink_client.get_waveforms(
                 self.network, self.stations, "*", self.channels, starttime, endtime
             )
+
+            if self.override_station:
+                trace: Trace
+                for trace in st:
+                    trace.stats["station"] = self.override_station
+
             logger.debug(f"Stream {st}")
 
             # Append the new data to the buffer
@@ -94,37 +102,23 @@ class Seedlink:
 
     @measure_execution_time
     def produce_windowed_data(self, stream: Stream, first_starttime, first_endtime):
-        dt = UTCDateTime(first_starttime)
+        rounded_starttime = nearest_datetime_rounded(first_starttime, 0.04 * 10**6)
+        dt = UTCDateTime(rounded_starttime)
+
+        logger.info("Producing windowed events to kafka")
 
         while dt + 8 <= first_endtime:
-            windowed_data = [None, None, None]
             trimmed = stream.slice(dt, dt + 8, keep_empty_traces=True)
             if len(trimmed) > 0:
                 event = {
                     "station": trimmed[0].stats["station"],
                 }
                 for detail in trimmed:
-                    if detail.stats["channel"] == "BHE":
-                        windowed_data[0] = detail.data
-                        event["BHE"] = {
-                            "starttime": str(detail.stats.starttime),
-                            "endtime": str(detail.stats.endtime),
-                            "data": detail.data.tolist(),
-                        }
-                    elif detail.stats["channel"] == "BHN":
-                        windowed_data[1] = detail.data
-                        event["BHN"] = {
-                            "starttime": str(detail.stats.starttime),
-                            "endtime": str(detail.stats.endtime),
-                            "data": detail.data.tolist(),
-                        }
-                    elif detail.stats["channel"] == "BHZ":
-                        windowed_data[2] = detail.data
-                        event["BHZ"] = {
-                            "starttime": str(detail.stats.starttime),
-                            "endtime": str(detail.stats.endtime),
-                            "data": detail.data.tolist(),
-                        }
+                    event[detail.stats["channel"]] = {
+                        "starttime": str(detail.stats.starttime),
+                        "endtime": str(detail.stats.endtime),
+                        "data": detail.data.tolist(),
+                    }
                 self.producer.produce_message(event, event["station"])
             dt += 0.04
         return dt

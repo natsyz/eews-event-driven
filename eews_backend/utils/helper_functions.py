@@ -2,6 +2,7 @@ from scipy.signal import butter, filtfilt, lfilter
 from obspy.signal.trigger import recursive_sta_lta, trigger_onset
 from obspy import UTCDateTime
 from datetime import datetime, timedelta
+from dateutil import parser
 from pprint import pprint
 import pandas as pd
 import numpy as np
@@ -194,7 +195,13 @@ def get_current_utc_datetime():
     return datetime.now(pytz.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-def nearest_datetime_rounded(datetime: datetime, step_in_micros: int = 40000):
+def nearest_datetime_rounded(
+    datetime: str | datetime | UTCDateTime, step_in_micros: int = 40000
+):
+    if type(datetime) == str:
+        datetime = parser.parse(datetime)
+    if type(datetime) == UTCDateTime:
+        datetime = datetime.datetime
     microsecond = datetime.time().microsecond
     remainder = microsecond % step_in_micros
     rounded = datetime
@@ -205,7 +212,6 @@ def nearest_datetime_rounded(datetime: datetime, step_in_micros: int = 40000):
     return rounded
 
 
-@measure_execution_time
 def fill_empty_timestamp(
     start: datetime,
     end: datetime,
