@@ -15,9 +15,10 @@ from fastapi.params import Body
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from influxdb_client.client.flux_table import TableList
 from typing import Dict, List
 from influxdb_client import Point, WritePrecision
-from obspy import read
+from obspy import Stream, Trace, read
 from logging.config import dictConfig
 
 from database.mongodb import mongo_client
@@ -41,7 +42,8 @@ dictConfig(logging_config)
 
 MODULE_DIR = "./rest/"
 STATIC_DIR = "static/"
-SIMULATE_REALTIME = True if os.getenv("SIMULATE_REALTIME") == "True" else False
+SIMULATE_REALTIME = False if os.getenv("SIMULATE_REALTIME") == "False" else True
+MSEED_RANGE_IN_SECONDS = 30
 
 origins = [
     "http://localhost",
@@ -110,19 +112,24 @@ HTML = """
 async def test():
     query_api = client.query_api()
     now = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
+    now = datetime.now(tz=timezone.utc)
     first_starttime = now
     query = f"""
     from(bucket: "eews") 
-        |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
+        |> range(start: {(now - timedelta(seconds=60)).isoformat()}, stop: {now.isoformat()}) 
         |> filter(fn: (r) => r["_measurement"] == "seismograf") 
         |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
     start = time.monotonic_ns()
     data: pd.DataFrame = query_api.query_data_frame(query=query)
-    log.debug(data)
-    extended_data = fill_empty_timestamp((now - timedelta(seconds=1)), now, data)
-    print(extended_data)
+    data2: TableList = query_api.query(query=query)
+    # TODO: Update result for easier handling in frontend
+    result = {}
+    # log.debug(data)
+    # extended_data = fill_empty_timestamp((now - timedelta(seconds=1)), now, data)
+    # print(extended_data)
     log.debug(f"{(time.monotonic_ns() - start)/10**9}s")
-    return extended_data.to_dict()
+    return data2.to_json()
+    # return extended_data.to_dict()
 
 
 @app.get("/")
@@ -137,7 +144,9 @@ async def websocket_endpoint(websocket: WebSocket):
         query_api = client.query_api()
         now = datetime(2015, 8, 20, 15, 12, 1, tzinfo=timezone.utc)
         if SIMULATE_REALTIME:
-            now = datetime.now(tz=timezone.utc) - timedelta(seconds=10)
+            now = datetime.now(tz=timezone.utc) - timedelta(
+                seconds=MSEED_RANGE_IN_SECONDS
+            )
         while True:
             start = time.monotonic_ns()
             query = f"""
@@ -149,6 +158,8 @@ async def websocket_endpoint(websocket: WebSocket):
             extended_data = fill_empty_timestamp(
                 (now - timedelta(seconds=1)), now, data
             )
+            # TODO: Update result for easier handling in frontend
+            result = {}
             log.debug(now)
             log.debug(data)
             json_data = extended_data.to_json()
@@ -278,84 +289,85 @@ def calculate_closest_station(
 @measure_execution_time
 def save_mseed(contents: bytes, filename: str):
     log.info("Saving mseed on the background")
+    st = read(io.BytesIO(contents))
 
+    log.debug(f"Stream {st}")
+
+    if len(st) > 0:
+        first_starttime = min([trace.stats["starttime"] for trace in st])
+        first_endtime = min([trace.stats["endtime"] for trace in st])
+
+        processed = process_data(st)
+        produce_windowed_data(processed, first_starttime, first_endtime)
+        save_to_influx(st)
+
+
+@measure_execution_time
+def produce_windowed_data(stream: Stream, first_starttime, first_endtime):
+    rounded_starttime = nearest_datetime_rounded(first_starttime, 0.04 * 10**6)
+    dt = UTCDateTime(rounded_starttime)
+
+    log.info("Producing windowed events to kafka")
+
+    while dt + 8 <= first_endtime:
+        trimmed = stream.slice(dt, dt + 8, keep_empty_traces=True)
+        if len(trimmed) > 0:
+            event = {
+                "station": trimmed[0].stats["station"],
+            }
+            for detail in trimmed:
+                event[detail.stats["channel"]] = {
+                    "starttime": str(detail.stats.starttime),
+                    "endtime": str(detail.stats.endtime),
+                    "data": detail.data.tolist(),
+                }
+            producer.produce_message(event, event["station"])
+        dt += 0.04
+    return dt
+
+
+@measure_execution_time
+def save_to_influx(stream: Stream):
+    trace: Trace
     records = []
-    events = []
-    traces = process_data(io.BytesIO(contents))
-    start = time.monotonic_ns()
-    for mseed_data in traces:
-        starttime: datetime = UTCDateTime(mseed_data["starttime"]).datetime
-        if SIMULATE_REALTIME:
-            starttime = (UTCDateTime().now() - 10).datetime
-        delta = 1 / int(mseed_data["sampling_rate"])
-        channel = mseed_data["channel"]
-        station = mseed_data["station"]
-        first_starttime = nearest_datetime_rounded(starttime, delta * 10**6)
+    for trace in stream:
+        starttime: datetime = UTCDateTime(trace.stats.starttime).datetime
+        delta = 1 / int(trace.stats.sampling_rate)
+        channel = trace.stats.channel
+        station = trace.stats.station
 
-        log.debug(
-            f"Processing {station}_{channel} from {filename} with len {len(mseed_data['data_interpolated'])}"
-        )
-
-        for data_point in mseed_data["data_interpolated"]:
+        for data_point in trace.data:
             point = (
                 Point("seismograf")
-                .time(first_starttime, write_precision=WritePrecision.MS)
+                .time(starttime, write_precision=WritePrecision.MS)
                 .tag("channel", channel)
                 .tag("station", station)
                 .field("data", data_point)
             )
             records.append(point)
-            event = {
-                "station": station,
-                "channel": channel,
-                "time": f"{first_starttime.isoformat()}Z",
-                "data": data_point,
-            }
-            events.append(event)
-            first_starttime += timedelta(seconds=delta)
+            starttime += timedelta(seconds=delta)
 
     with client.write_api() as writer:
-        log.debug("Start batch save to InfluxDB")
+        log.info(f"Start batch save of {len(records)} data to InfluxDB")
         writer.write(bucket="eews", record=records)
-
-    log.debug("Start producing events")
-    for i in range(len(events)):
-        producer.produce_message(
-            events[i], f"{events[i]['channel']}_{events[i]['station']}"
-        )
-
-    log.debug(
-        f"Finished process mseed with {len(records)} data for {(time.monotonic_ns() - start) / 10**9}s with rate of {len(records)/((time.monotonic_ns() - start) / 10**9)}"
-    )
 
 
 @measure_execution_time
-def process_data(mseed_filename: str):
-    mseed_data = read(mseed_filename)
-    traces = []
+def process_data(stream: Stream):
+    mseed_data = stream
+    new_stream = Stream()
+    detail: Trace
     for detail in mseed_data:
-        preprocessed = {}
+        trace = detail.copy()
         fs = detail.stats.sampling_rate
         lowcut = 1.0
         highcut = 5.0
         order = 5
-        preprocessed["network"] = detail.stats.network
-        preprocessed["station"] = detail.stats.station
-        preprocessed["channel"] = detail.stats.channel
-        preprocessed["location"] = detail.stats.location
-        preprocessed["starttime"] = str(detail.stats.starttime)
-        preprocessed["endtime"] = str(detail.stats.endtime)
-        preprocessed["delta"] = detail.stats.delta
-        preprocessed["npts"] = detail.stats.npts
-        preprocessed["calib"] = detail.stats.calib
-        preprocessed["data"] = detail.data
         data_before = detail.data
         data_processed = butter_bandpass_filter(data_before, lowcut, highcut, fs, order)
-        data_to = list(data_processed)
-        data_to = letInterpolate(
-            data_to, int(ceil(len(data_to) * 25 / detail.stats.sampling_rate))
-        )
-        preprocessed["sampling_rate"] = 25.0
-        preprocessed["data_interpolated"] = data_to
-        traces.append(preprocessed)
-    return traces
+        trace.data = data_processed
+        trace.interpolate(25)
+        trace.stats["delta"] = 1 / 25
+        trace.stats["sampling_rate"] = 25
+        new_stream.append(trace)
+    return new_stream
