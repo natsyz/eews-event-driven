@@ -1,6 +1,14 @@
 from typing import List
 from .seedlink import Seedlink
 import multiprocessing
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+station_list = os.getenv("STATION_LIST")
+if type(station_list) == str:
+    station_list = station_list.split(",")
 
 global process_list
 process_list: List[multiprocessing.Process] = []
@@ -12,7 +20,7 @@ def seedlink_process(station: str):
 
 
 def main():
-    stations = ["JAGI", "BNDI"]
+    stations = station_list if station_list else ["JAGI", "BNDI"]
     for station in stations:
         process = multiprocessing.Process(target=seedlink_process, args=(station,))
         process.name = f"seedlink_{station}"
