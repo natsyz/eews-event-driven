@@ -1,17 +1,14 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
+class Location(BaseModel):
+    coordinates: list[float] | None = [None, None]
+    type: Literal['Point']
 
-class UpdateStationModel(BaseModel):
+class StationModel(BaseModel):
     name: str = Field()
     description: Optional[str] = Field()
-    x: float = Field()
-    y: float = Field()
-
-
-class StationModel(UpdateStationModel):
-    closest_stations: List[str] = Field()
-
+    location: Location
 
 class MSeedData(BaseModel):
     network: Optional[str] = Field()
