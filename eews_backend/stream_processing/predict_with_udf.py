@@ -43,6 +43,7 @@ df = spark \
 # SCHEMA INPUT
 schema = StructType([\
     StructField("station", StringType()), \
+    StructField("data", StringType()), \
     StructField("time", StringType())])
 
 # PARSE INPUT JSON
@@ -50,45 +51,11 @@ df_json = df.selectExpr("CAST(value AS STRING) as json") \
         .select(f.from_json("json", schema).alias("data")) \
         .select("data.*")
 
-def apply_prediction(station, time, config):
+def apply_prediction(station, data, time, config):
     from pymongo import MongoClient
     import numpy as np
     import pandas as pd
-    import pause
-    
-    def read_seis_influx(stations, time):
-        # Init influx
-        INFLUXDB_ORG = config["INFLUXDB_ORG"]
-        INFLUXDB_BUCKET = config["INFLUXDB_BUCKET"]
-        INFLUXDB_TOKEN = config["INFLUXDB_TOKEN"]
-        INFLUXDB_URL = config["INFLUXDB_URL"]
-        client = InfluxDBClient(
-            url=INFLUXDB_URL,
-            org=INFLUXDB_ORG,
-            token=INFLUXDB_TOKEN
-        )
-        query_api = client.query_api()
-
-        # Define query
-        start_time = (time - datetime.timedelta(0,10)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        stop_time = (time + datetime.timedelta(0,10)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-        query = f"""from(bucket: "eews")
-        |> range(start: {start_time}, stop: {stop_time})
-        |> filter(fn: (r) => r._measurement == "seismograf" and contains(value: r.station, set: {str(stations).replace("'", '"')}) )""" 
-        tables = query_api.query(query, org="eews")
-        
-        # Parse query result
-        dct = {k:{} for k in stations}
-        for table in tables:
-            res = []
-            for record in table.records:
-                res.append(record.get_value())
-            dct[record.values.get("station")][record.values.get("channel")] = res
-        
-        data = list(filter(None, dct.values()))
-        return data
-
+   
     def preprocess(data):
         def letInterpolate(inp, new_len):
             delta = (len(inp)-1) / (new_len-1)
@@ -100,7 +67,7 @@ def apply_prediction(station, time, config):
             j = i+1 if f > 0 else i  # Avoid index error.
             return (1-f) * lst[i] + f * lst[j]
 
-        data_interpolated = list(map(lambda x : letInterpolate(x, 2000), data))
+        data_interpolated = list(map(lambda x : letInterpolate(x, 800), data))
         data_interpolated_transformed = []
         for i in range(len(data_interpolated[0])):
             data_interpolated_transformed.append([data_interpolated[0][i], data_interpolated[1][i], data_interpolated[2][i]])
@@ -131,23 +98,9 @@ def apply_prediction(station, time, config):
     client = MongoClient(MONGO_URL)
     db = client[MONGO_DATABASE]
 
-    # Get nearest station from Mongo
-    coordinates = db["station"].find_one({ "name": station })["location"]["coordinates"]
-    stations = db["station"].find({ "location": {"$nearSphere": {"$geometry": {"type": "Point", "coordinates": coordinates}, "$maxDistance": 200000}}}, {"name": 1, "_id": 0})
-    stations = names if len(names:=[station["name"] for station in stations]) <= 3 else names[:3]
-
-    # Get each station data from Influx
-    pause.until(datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ") + datetime.timedelta(seconds=10))
-    influx_data = read_seis_influx(stations, datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ"))
-
     # Preprocess (interpolation and transformation) data
-    seis_data = list(map(lambda station : preprocess(list(station.values())), influx_data))
-
-    # Fill data so that len(seis_data)==3 (need three station data to make prediction)
-    if len(seis_data) == 1:
-        seis_data *= 3
-    elif len(seis_data) == 2:
-        seis_data.append(seis_data[0])
+    seis_data = preprocess(eval(data))
+    seis_data = [seis_data, seis_data, seis_data]
 
     # Predict data
     preds = broadcasted_model.value.predict(np.array(seis_data), batch_size=4)
@@ -168,10 +121,10 @@ def apply_prediction(station, time, config):
     return json.dumps(json_message)
 
 # CONVERT FUNCTION TO UDF
-prediction_udf = f.udf(lambda data1, data2: apply_prediction(data1, data2, config), StringType())
+prediction_udf = f.udf(lambda data1, data2, data3: apply_prediction(data1, data2, data3, config), StringType())
 
 # APPLY UDF TO DATAFRAME AND PRODUCE TO KAFKA
-query = df_json.select((prediction_udf(df_json.station, df_json.time)).alias("value"))\
+query = df_json.select((prediction_udf(df_json.station, df_json.data, df_json.time)).alias("value"))\
     .selectExpr("CAST(value AS STRING)")\
     .writeStream \
     .format("kafka") \
