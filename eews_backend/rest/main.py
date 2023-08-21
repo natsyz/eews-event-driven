@@ -189,9 +189,7 @@ async def get_seismometer(name: str):
 
 
 @app.put("/station/{name}", response_model=StationModel)
-async def update_seismometer(
-    name: str, background_task: BackgroundTasks, data: UpdateStationModel = Body(...)
-):
+async def update_seismometer(name: str, data: StationModel = Body(...)):
     data = data.model_dump()
 
     if len(data) >= 1:
@@ -201,11 +199,9 @@ async def update_seismometer(
             if (
                 updated_data := await db["station"].find_one({"name": name})
             ) is not None:
-                background_task.add_task(adjust_closest_stations)
                 return updated_data
 
     if (existing_data := await db["station"].find_one({"name": name})) is not None:
-        await adjust_closest_stations()
         return existing_data
 
     raise HTTPException(
@@ -214,9 +210,7 @@ async def update_seismometer(
 
 
 @app.post("/station", response_model=StationModel, status_code=status.HTTP_201_CREATED)
-async def create_seismometer(
-    background_task: BackgroundTasks, data: UpdateStationModel = Body(...)
-):
+async def create_seismometer(data: StationModel = Body(...)):
     data = data.model_dump()
     if (
         existing_data := await db["station"].find_one({"name": data["name"]})
@@ -226,25 +220,18 @@ async def create_seismometer(
             detail=f"Seismometer with name {data['name']} already exists",
         )
 
-    all_stations = await db["station"].find().to_list(1000000000)
-    calculated = dict()
-
-    data["closest_stations"] = calculate_closest_station(data, all_stations, calculated)
-
     new_data = await db["station"].insert_one(data)
     if (
         existing_data := await db["station"].find_one({"_id": new_data.inserted_id})
     ) is not None:
-        await adjust_closest_stations()
         return existing_data
 
 
 @app.delete("/station/{name}")
-async def delete_seismometer(name: str, background_task: BackgroundTasks):
+async def delete_seismometer(name: str):
     delete_result = await db["station"].delete_one({"name": name})
 
     if delete_result.deleted_count == 1:
-        await adjust_closest_stations()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     raise HTTPException(

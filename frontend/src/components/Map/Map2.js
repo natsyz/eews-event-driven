@@ -31,7 +31,7 @@ const Map = (props) => {
     const jsonData = await response.json()
     setStations(jsonData)
     jsonData.forEach(element => {
-      L.marker([element["x"], element["y"]], {icon: customMarkerIcon(element["name"])}).addTo(mapRef.current).bindPopup(popupContent(element["name"], element["description"]));
+      L.marker([element["location"]["coordinates"]["1"], element["location"]["coordinates"]["0"]], {icon: customMarkerIcon(element["name"])}).addTo(mapRef.current).bindPopup(popupContent(element["name"], element["description"]));
     });
   }
   if (mapRef.current == undefined) {
