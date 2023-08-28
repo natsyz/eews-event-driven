@@ -48,7 +48,10 @@ class Seedlink:
         self.seedlink_client = SeedlinkClient("geofon.gfz-potsdam.de", 18000)
         self.influx_client = influx_client()
         self.producer = KafkaProducer(PREPROCESSED_TOPIC)
+        # self.raw_producer = KafkaProducer(RAW_TOPIC)
         self.override_station = override_station
+        # self.raw_producer_threads = []
+        # self.produce_raw()
 
     def start(self):
         # Set the start and end times for the plot
@@ -100,6 +103,44 @@ class Seedlink:
 
             time.sleep(max(self.poll_interval - diff, 0))
 
+    # @threaded
+    # def produce_raw(self):
+    #     while True:
+    #         if len(self.buffer) > 0 and self.all_threads_finished():
+    #             logger.info("Scheduling raw events to kafka")
+    #             current_stream: Stream = self.buffer.pop(0)
+    #             for trace in current_stream:
+    #                 thread = threading.Thread(
+    #                     target=self.produce_raw_trace, args=(trace,)
+    #                 )
+    #                 self.raw_producer_threads.append(thread)
+    #                 thread.start()
+
+    # def all_threads_finished(self):
+    #     thread: threading.Thread
+    #     for thread in self.raw_producer_threads:
+    #         if thread.is_alive():
+    #             return False
+    #     self.raw_producer_threads = []
+    #     return True
+
+    # def produce_raw_trace(self, trace: Trace):
+    #     starttime = trace.stats["starttime"].datetime
+    #     sampling_rate = int(trace.stats["sampling_rate"])
+    #     delta = 1 / sampling_rate
+    #     for data in trace.data:
+    #         event = {
+    #             "station": trace.stats["station"],
+    #             "channel": trace.stats["channel"],
+    #             "data": float(data),
+    #             "time": str(starttime),
+    #         }
+    #         self.raw_producer.produce_message(
+    #             event, f"{event['channel']}_{event['station']}"
+    #         )
+    #         starttime += timedelta(seconds=delta)
+    #         time.sleep(delta)
+
     @measure_execution_time
     def produce_windowed_data(self, stream: Stream, first_starttime, first_endtime):
         rounded_starttime = nearest_datetime_rounded(first_starttime, 0.04 * 10**6)
@@ -132,6 +173,7 @@ class Seedlink:
             delta = 1 / int(trace.stats.sampling_rate)
             channel = trace.stats.channel
             station = trace.stats.station
+            starttime = nearest_datetime_rounded(starttime, delta * 10**6)
 
             for data_point in trace.data:
                 point = (

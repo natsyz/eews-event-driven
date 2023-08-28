@@ -1,5 +1,8 @@
 from datetime import timedelta, timezone
+import random
+from dateutil import parser
 from math import ceil
+import uuid
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
@@ -15,15 +18,16 @@ from fastapi.params import Body
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from influxdb_client.client.flux_table import TableList
+from influxdb_client.client.flux_table import TableList, FluxRecord
 from typing import Dict, List
 from influxdb_client import Point, WritePrecision
 from obspy import Stream, Trace, read
+from pprint import pprint
 from logging.config import dictConfig
 
 from database.mongodb import mongo_client
 from database.influxdb import influx_client
-from stream import KafkaProducer, PREPROCESSED_TOPIC
+from stream import KafkaProducer, KafkaConsumer, PREPROCESSED_TOPIC, RAW_TOPIC
 from utils import *
 from .model import *
 from .websocket import ConnectionManager
@@ -36,6 +40,7 @@ import asyncio
 import pandas as pd
 import io
 import os
+import json
 
 load_dotenv()
 dictConfig(logging_config)
@@ -52,7 +57,6 @@ origins = [
 
 app = FastAPI()
 log = logging.getLogger("rest")
-app.mount("/static", StaticFiles(directory=f"{MODULE_DIR}{STATIC_DIR}"), name="static")
 
 
 app.add_middleware(
@@ -65,8 +69,9 @@ app.add_middleware(
 
 log.info(f"{SIMULATE_REALTIME=}")
 
-producer = KafkaProducer(PREPROCESSED_TOPIC)
 manager = ConnectionManager()
+# consumer = KafkaConsumer(RAW_TOPIC, uuid.uuid4())
+producer = KafkaProducer(PREPROCESSED_TOPIC)
 _, db = mongo_client()
 client = influx_client()
 
@@ -108,27 +113,106 @@ HTML = """
 """
 
 
+# @threaded
+# def listen(consumer: KafkaConsumer, manager: ConnectionManager):
+#     log.info("Listening for messages")
+#     try:
+#         consumer.consume(on_message=lambda message: manager.broadcast(message))
+#     except Exception as e:
+#         log.error(e)
+
+
+# @app.on_event("startup")
+# async def startup_event():
+#     try:
+#         listen(consumer, manager)
+#     except Exception as e:
+#         log.error(e)
+
+
+@app.get("/post", status_code=201)
+async def post():
+    pass
+    # data = {
+    #     "lat": random.uniform(5.626791, -9),
+    #     "long": random.uniform(95.429725, 140.884050),
+    #     "depth": 8889.901495235445,
+    #     "magnitude": 42.41240072250366,
+    #     "time": 1548.9176885528566,
+    #     "p-arrival": parser.parse("2015-08-20T15:11:00.000Z"),
+    #     "expired": parser.parse("2015-08-20T15:12:00.000Z"),
+    #     "station": "ABJI",
+    # }
+    # print(data)
+    # await db["prediction"].insert_one(data)
+
+    # time = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
+    # records = []
+    # with client.write_api() as writer:
+    #     for i in range(10):
+    #         records.append(
+    #             Point("p_arrival")
+    #             .time(time + timedelta(seconds=i), write_precision=WritePrecision.S)
+    #             .tag("station", "KHK")
+    #             .field("time_data", (time + timedelta(seconds=i)).isoformat())
+    #         )
+    #     print(records)
+    #     writer.write(bucket="eews", record=records)
+
+
 @app.get("/test")
 async def test():
     query_api = client.query_api()
     now = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
-    now = datetime.now(tz=timezone.utc)
-    first_starttime = now
     query = f"""
-    from(bucket: "eews") 
-        |> range(start: {(now - timedelta(seconds=60)).isoformat()}, stop: {now.isoformat()}) 
-        |> filter(fn: (r) => r["_measurement"] == "seismograf") 
-        |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
-    start = time.monotonic_ns()
-    data: pd.DataFrame = query_api.query_data_frame(query=query)
-    data2: TableList = query_api.query(query=query)
-    # TODO: Update result for easier handling in frontend
+            from(bucket: "eews") 
+                |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
+                |> filter(fn: (r) => r["_measurement"] == "p_arrival" or r["_measurement"] == "seismograf")"""
+    data: TableList = query_api.query(query=query)
     result = {}
-    # log.debug(data)
-    # extended_data = fill_empty_timestamp((now - timedelta(seconds=1)), now, data)
-    # print(extended_data)
-    log.debug(f"{(time.monotonic_ns() - start)/10**9}s")
-    return data2.to_json()
+    for records in data:
+        row: FluxRecord
+        for row in records:
+            station = row.values["station"]
+            _time = row.values["_time"]
+
+            current_station = result.get(
+                station, {"BHE": [], "BHN": [], "BHZ": [], "p_arrival": []}
+            )
+
+            if row.values["_measurement"] == "seismograf":
+                channel = row.values["channel"]
+                data = row.values["_value"]
+                current_channel = current_station[channel]
+                current_channel.append(
+                    {
+                        "time": _time.isoformat(),
+                        "data": data,
+                    }
+                )
+                current_station[channel] = current_channel
+                result[station] = current_station
+
+            elif row.values["_measurement"] == "p_arrival":
+                current_station["p_arrival"].append(_time.isoformat())
+                result[station] = current_station
+
+    prediction = (
+        await db["prediction"]
+        .find(
+            {
+                "p-arrival": {"$lte": now - timedelta(seconds=1)},
+                "expired": {"$gte": now},
+            }
+        )
+        .to_list(1000000000)
+    )
+    for p in prediction:
+        del p["_id"]
+
+    print(now - timedelta(seconds=1))
+    print(now)
+    return {"data": result, "prediction": prediction}
     # return extended_data.to_dict()
 
 
@@ -142,7 +226,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
-        now = datetime(2015, 8, 20, 15, 12, 1, tzinfo=timezone.utc)
+        now = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
         if SIMULATE_REALTIME:
             now = datetime.now(tz=timezone.utc) - timedelta(
                 seconds=MSEED_RANGE_IN_SECONDS
@@ -152,22 +236,58 @@ async def websocket_endpoint(websocket: WebSocket):
             query = f"""
             from(bucket: "eews") 
                 |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
-                |> filter(fn: (r) => r["_measurement"] == "seismograf") 
-                |> pivot(rowKey: ["_time"], columnKey: ["channel", "station"], valueColumn: "_value")"""
-            data: pd.DataFrame = query_api.query_data_frame(query=query)
-            extended_data = fill_empty_timestamp(
-                (now - timedelta(seconds=1)), now, data
-            )
-            # TODO: Update result for easier handling in frontend
+                |> filter(fn: (r) => r["_measurement"] == "p_arrival" or r["_measurement"] == "seismograf")"""
+            data: TableList = query_api.query(query=query)
             result = {}
-            log.debug(now)
-            log.debug(data)
-            json_data = extended_data.to_json()
+            for records in data:
+                row: FluxRecord
+                for row in records:
+                    station = row.values["station"]
+                    _time = row.values["_time"]
+
+                    current_station = result.get(
+                        station, {"BHE": [], "BHN": [], "BHZ": [], "p_arrival": []}
+                    )
+
+                    if row.values["_measurement"] == "seismograf":
+                        channel = row.values["channel"]
+                        data = row.values["_value"]
+                        current_channel = current_station[channel]
+                        current_channel.append(
+                            {
+                                "time": _time.isoformat(),
+                                "data": data,
+                            }
+                        )
+                        current_station[channel] = current_channel
+                        result[station] = current_station
+
+                    elif row.values["_measurement"] == "p_arrival":
+                        current_station["p_arrival"].append(_time.isoformat())
+                        result[station] = current_station
+
+            prediction = (
+                await db["prediction"]
+                .find(
+                    {
+                        "p-arrival": {"$lte": now - timedelta(seconds=1)},
+                        "expired": {"$gte": now},
+                    }
+                )
+                .to_list(1000000000)
+            )
+            for p in prediction:
+                del p["_id"]
+                del p["p-arrival"]
+                del p["expired"]
+
+            json_data = json.dumps({"data": result, "prediction": prediction})
             now += timedelta(seconds=1)
             await manager.broadcast(json_data)
             diff = (time.monotonic_ns() - start) / 10**9
             await asyncio.sleep(1 - diff)
-    except Exception:
+    except Exception as e:
+        log.error(e)
         log.warning(f"Client {websocket} has been disconnected")
         manager.disconnect(websocket)
 
@@ -249,44 +369,6 @@ async def upload_mseed(file: UploadFile, background_tasks: BackgroundTasks):
 
 
 @measure_execution_time
-async def adjust_closest_stations(all_stations=None):
-    log.info("Adjusting closest stations")
-    if not all_stations:
-        all_stations = await db["station"].find().to_list(1000000000)
-
-    calculated = dict()
-
-    for station in all_stations:
-        station["closest_stations"] = calculate_closest_station(
-            station, all_stations, calculated
-        )
-        await db["station"].update_one({"name": station["name"]}, {"$set": station})
-
-
-def calculate_closest_station(
-    curr_station: List[Dict], all_stations: List[Dict], calculated: Dict = None
-):
-    distances = []
-
-    for other_station in all_stations:
-        if other_station["name"] == curr_station["name"]:
-            continue
-        distance = float("inf")
-        if f"{other_station['name']}-{curr_station['name']}" in calculated:
-            distance = calculated[f"{other_station['name']}-{curr_station['name']}"]
-        else:
-            distance = hs.haversine(
-                (curr_station["x"], curr_station["y"]),
-                (other_station["x"], other_station["y"]),
-            )
-            calculated[f"{curr_station['name']}-{other_station['name']}"] = distance
-        distances.append((other_station["name"], distance))
-
-    distances.sort(key=lambda x: x[1])
-    return [i[0] for i in distances[:3]]
-
-
-@measure_execution_time
 def save_mseed(contents: bytes, filename: str):
     log.info("Saving mseed on the background")
     st = read(io.BytesIO(contents))
@@ -335,6 +417,7 @@ def save_to_influx(stream: Stream):
         delta = 1 / int(trace.stats.sampling_rate)
         channel = trace.stats.channel
         station = trace.stats.station
+        starttime = nearest_datetime_rounded(starttime, delta * 10**6)
 
         for data_point in trace.data:
             point = (

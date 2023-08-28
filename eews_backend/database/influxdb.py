@@ -1,5 +1,5 @@
 from influxdb_client.client.write_api import SYNCHRONOUS
-from influxdb_client import InfluxDBClient, WriteOptions
+from influxdb_client import InfluxDBClient
 from dotenv import load_dotenv
 import os
 
