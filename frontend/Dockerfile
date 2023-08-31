@@ -11,6 +11,10 @@ WORKDIR /frontend
 
 COPY /frontend .
 
+ARG REACT_APP_API
+
+ENV REACT_APP_API 34.87.114.141
+
 # Build the project and copy the files
 RUN npm run build
 
@@ -28,6 +32,6 @@ RUN rm -rf /usr/share/nginx/html/*
 # Copy from the stahg 1
 COPY --from=builder /frontend/build /usr/share/nginx/html
 
-EXPOSE 8000 80 443
+EXPOSE 80 443
 
 ENTRYPOINT ["nginx", "-g", "daemon off;"]
