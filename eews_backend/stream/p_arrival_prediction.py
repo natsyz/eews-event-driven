@@ -31,7 +31,6 @@ MONGO_USERNAME = config["MONGO_USERNAME"]
 MONGO_PASSWORD = config["MONGO_PASSWORD"]
 REDIS_HOST = config["REDIS_HOST"]
 
-
 def main():
     # Inisialisasi SparkSession
     spark = SparkSession \
@@ -40,13 +39,6 @@ def main():
         .getOrCreate()
     sc = spark.sparkContext
 
-    df = spark \
-        .readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", BOOTSTRAP_SERVER) \
-        .option("subscribe", PREPROCESSED_TOPIC) \
-        .load()
-
     dependencies = {
         "mean_absolute_error": MeanAbsoluteError,
         "function": MeanAbsoluteError
@@ -54,6 +46,13 @@ def main():
     model = load_model(MODEL_FILE, custom_objects=dependencies)
     broadcasted_model = sc.broadcast(model)
 
+
+    df = spark \
+        .readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", BOOTSTRAP_SERVER) \
+        .option("subscribe", PREPROCESSED_TOPIC) \
+        .load()
 
     schema = StructType([
         StructField("BHE", StructType([
@@ -82,7 +81,7 @@ def main():
         from pymongo import MongoClient
         import numpy as np
         import pandas as pd
-    
+
         def preprocess(data):
             data_interpolated = list(map(lambda x : letInterpolate(x, 800), data))
             data_interpolated_transformed = []
@@ -96,7 +95,7 @@ def main():
         db = client[MONGO_DATABASE]
 
         # Preprocess (interpolation and transformation) data
-        seis_data = preprocess(eval(data))
+        seis_data = preprocess(data)
         seis_data = [seis_data, seis_data, seis_data]
 
         # Predict data
@@ -220,10 +219,10 @@ def main():
         .select(from_json("json", schema).alias("data")) \
         .select("data.*")
     waktu_sebelum_panggil_function = str(datetime.datetime.now())
-    
+
     df_processed = df_listen.withColumn("p_arrival",prediction_udf("BHE","BHN","BHZ","injected_to_preprocessed_at","station"))
     df_not_null = df_processed.filter('p_arrival is not null').select(col("p_arrival").alias("value"))
-    
+
     query = df_not_null\
     .writeStream \
     .format("kafka") \
@@ -245,7 +244,7 @@ def main():
     #.option("topic", P_ARRIVAL_TOPIC) \
     #.option("checkpointLocation", "/tmp/checkpoint") \
     #.start()
-    
+
     query.awaitTermination()
 
 if __name__ == '__main__':
