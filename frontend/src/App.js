@@ -10,7 +10,7 @@ import About from "./pages/About";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 
 const App = () => {
-  var api = process.env.NODE_ENV == 'production'? process.env.REACT_APP_API + '/api': 'localhost:8000';
+  var api = process.env.NODE_ENV == 'production'? process.env.REACT_APP_API : 'localhost';
   return (
     <Router>
       <Navibar />

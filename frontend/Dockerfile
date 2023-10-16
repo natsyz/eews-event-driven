@@ -11,9 +11,9 @@ WORKDIR /frontend
 
 COPY /frontend .
 
+# Backend IP
 ARG REACT_APP_API
-
-ENV REACT_APP_API 34.87.114.141
+ENV REACT_APP_API 34.101.239.0:80
 
 # Build the project and copy the files
 RUN npm run build
