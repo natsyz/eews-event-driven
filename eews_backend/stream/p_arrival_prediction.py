@@ -123,27 +123,23 @@ def main():
         bhn_data = bhn.data
         bhz_data = bhz.data
         
-        #anggap data sudah bersih
+        # Anggap data sudah bersih
         sampling = 25
         start_hitung_p_arrival = time.monotonic_ns()
         search_p_arrival = get_Parrival(bhe_data,bhn_data,bhz_data, sampling)
         waktu_hitung_p_arrival = (time.monotonic_ns() - start_hitung_p_arrival) / 10**9
         
-        #data = [bhe_data,bhz_data,bhn_data]
-        #self.find_p_arrival(station,time_injected,data)
-        
         start_redis = time.monotonic_ns()
 
         redis_client = redis.StrictRedis(host=REDIS_HOST, port=6379, db=0)
         p_arrival_flag = redis_client.hget(station,"p_arrival")
-        search_p_arrival = [1] #untuk testing produce topic p-arrival
         data = [bhe_data,bhz_data,bhn_data]
 
         waktu_redis = (time.monotonic_ns() - start_redis) / 10**9
 
-        #Mengecek deteksi P arrival 4 kali berturut-turut
+        # Mengecek deteksi P arrival 4 kali berturut-turut
         if p_arrival_flag == None :
-            if len(search_p_arrival) > 0 :
+            if search_p_arrival != -1 :
                 redis_client.hset(station,'p_arrival',1)
                 redis_client.expire(station, 10)
                 waktu_kirim = str(datetime.datetime.now())
@@ -160,7 +156,7 @@ def main():
                     'waktu_kirim':waktu_kirim}
                 return json.dumps(json_data)
         else :
-            if len(search_p_arrival) > 0 :
+            if search_p_arrival != -1 :
                 if int(p_arrival_flag) < 3 :
                     redis_client.hset(station,'p_arrival',int(p_arrival_flag) + 1)
                     redis_client.expire(station, 10)
@@ -178,8 +174,8 @@ def main():
                     'waktu_kirim':waktu_kirim}
                     return json.dumps(json_data)
                 else :
+                    # Sudah menemukan 4 p arrival berturut-turut
                     redis_client.delete(station)
-                    #sudah menemukan 4 p arrival berturut-turut
                     start_influx = time.monotonic_ns()
                     point = Point("p_arrival").time(injected_to_preprocessed_at, write_precision=WritePrecision.MS).tag("station", station).field("time_data", injected_to_preprocessed_at)
                     write_api = client.write_api(write_options=SYNCHRONOUS)
@@ -204,9 +200,6 @@ def main():
                     json_data = json_data | pred_data
                     value = json.dumps(json_data).encode('utf-8')
 
-                    #producer = KafkaProducer(bootstrap_servers=BOOTSTRAP_SERVER)
-                    #producer.send(P_ARRIVAL_TOPIC, value=value)
-                    #producer.flush()
                     return json.dumps(json_data)
             else :
                 redis_client.delete(station)
@@ -227,23 +220,9 @@ def main():
     .writeStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", BOOTSTRAP_SERVER) \
-    .option("topic", P_ARRIVAL_TOPIC) \
+    .option("topic", PREDICTION_TOPIC) \
     .option("checkpointLocation", "/tmp/checkpoint") \
     .start()
-    '''
-    #.filter(df_not_null['value'].isNotNull())\
-    query = df_not_null\
-    .filter(df_not_null['value'].isNotNull())\
-    .writeStream \
-    .format("console") \
-    .start()
-    '''
-    #.select(col("p_arrival").alias("value"))\
-    #.filter("value is not null")\
-    #.option("kafka.bootstrap.servers", BOOTSTRAP_SERVER) \
-    #.option("topic", P_ARRIVAL_TOPIC) \
-    #.option("checkpointLocation", "/tmp/checkpoint") \
-    #.start()
 
     query.awaitTermination()
 
