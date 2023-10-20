@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from motor import motor_asyncio
 from typing import Optional
+from pymongo import MongoClient
 import os
 
 load_dotenv()
@@ -19,5 +20,14 @@ def mongo_client():
     MONGO_USERNAME = os.getenv("MONGO_USERNAME")
     MONGO_PASSWORD =  os.getenv("MONGO_PASSWORD")
     client = motor_asyncio.AsyncIOMotorClient(mongo_url, username=MONGO_USERNAME, password=MONGO_PASSWORD)
+    db = client[mongo_db]
+    return client, db
+
+def mongo_client_sync():
+    mongo_url = MONGO_URL
+    mongo_db = MONGO_DATABASE
+    MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+    MONGO_PASSWORD =  os.getenv("MONGO_PASSWORD")
+    client = MongoClient(mongo_url, username=MONGO_USERNAME, password=MONGO_PASSWORD)
     db = client[mongo_db]
     return client, db

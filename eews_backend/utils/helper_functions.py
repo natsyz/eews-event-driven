@@ -2,7 +2,7 @@ from scipy.signal import butter, filtfilt, lfilter
 from obspy.signal.trigger import recursive_sta_lta, trigger_onset
 from obspy import UTCDateTime
 
-from database.mongodb import mongo_client
+from database.mongodb import mongo_client_sync
 from datetime import datetime, timedelta
 from dateutil import parser
 from pprint import pprint
@@ -214,10 +214,11 @@ def get_current_utc_datetime():
     return datetime.now(pytz.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 def get_nearest_station(name, max_distance):
-    _, db = mongo_client()
-    coordinates = db['seismometer'].find_one({ 'name': name })['location']['coordinates']
-    stations = db['seismometer'].find({ 'location': {'$nearSphere': {'$geometry': {'type': 'Point', 'coordinates': coordinates}, '$maxDistance': max_distance}}}, {'name': 1, '_id': 0})
+    _, db = mongo_client_sync()
+    coordinates = db['station'].find_one({ 'name': name })['location']['coordinates']
+    stations = db['station'].find({ 'location': {'$nearSphere': {'$geometry': {'type': 'Point', 'coordinates': coordinates}, '$maxDistance': max_distance}}}, {'name': 1, '_id': 0})
     return names if len(names:=[station['name'] for station in stations]) <= 3 else names[:3]
+  
 
 def nearest_datetime_rounded(
     datetime: str | datetime | UTCDateTime, step_in_micros: int = 40000
