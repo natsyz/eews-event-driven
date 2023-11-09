@@ -48,7 +48,8 @@ dictConfig(logging_config)
 MODULE_DIR = "./rest/"
 STATIC_DIR = "static/"
 SIMULATE_REALTIME = False if os.getenv("SIMULATE_REALTIME") == "False" else True
-MSEED_RANGE_IN_SECONDS = 30
+SIMULATE_DATETIME = os.getenv("SIMULATE_DATETIME")
+MSEED_RANGE_IN_SECONDS = os.getenv("MSEED_RANGE_IN_SECONDS")
 BACKEND_IP = os.getenv("BACKEND_IP") if os.getenv("BACKEND_IP") else "localhost"
 
 origins = [
@@ -229,10 +230,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         query_api = client.query_api()
-        now = datetime(2023, 10, 9, 2, 18, 19, tzinfo=timezone.utc) # Date for simulation purposes
+        now = parser.parse(SIMULATE_DATETIME) # Date for simulation purposes
         if SIMULATE_REALTIME:
             now = datetime.now(tz=timezone.utc) - timedelta(
-                seconds=MSEED_RANGE_IN_SECONDS
+                seconds = MSEED_RANGE_IN_SECONDS
             )
         while True:
             start = time.monotonic_ns()
