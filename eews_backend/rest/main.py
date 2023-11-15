@@ -49,7 +49,8 @@ MODULE_DIR = "./rest/"
 STATIC_DIR = "static/"
 SIMULATE_REALTIME = False if os.getenv("SIMULATE_REALTIME") == "False" else True
 SIMULATE_DATETIME = os.getenv("SIMULATE_DATETIME")
-MSEED_RANGE_IN_SECONDS = os.getenv("MSEED_RANGE_IN_SECONDS")
+LENGTH_DATA_IN_SECONDS = int(os.getenv("LENGTH_DATA_IN_SECONDS"))
+MSEED_RANGE_IN_SECONDS = int(os.getenv("MSEED_RANGE_IN_SECONDS"))
 BACKEND_IP = os.getenv("BACKEND_IP") if os.getenv("BACKEND_IP") else "localhost"
 FRONTEND_IP = os.getenv("FRONTEND_IP") if os.getenv("FRONTEND_IP") else "localhost"
 
@@ -169,10 +170,10 @@ async def post():
 @app.get("/test")
 async def test():
     query_api = client.query_api()
-    now = datetime(2015, 8, 20, 15, 11, 47, tzinfo=timezone.utc)
+    now = parser.parse(SIMULATE_DATETIME) # Date for simulation purposes
     query = f"""
             from(bucket: "eews") 
-                |> range(start: {(now - timedelta(seconds=1)).isoformat()}, stop: {now.isoformat()}) 
+                |> range(start: {(now - timedelta(seconds=LENGTH_DATA_IN_SECONDS)).isoformat()}, stop: {now.isoformat()}) 
                 |> filter(fn: (r) => r["_measurement"] == "p_arrival" or r["_measurement"] == "seismograf")"""
     data: TableList = query_api.query(query=query)
     result = {}
@@ -207,7 +208,7 @@ async def test():
         await db["prediction"]
         .find(
             {
-                "p-arrival": {"$lte": now - timedelta(seconds=1)},
+                "p-arrival": {"$lte": now - timedelta(seconds=LENGTH_DATA_IN_SECONDS)},
                 "expired": {"$gte": now},
             }
         )
@@ -216,7 +217,7 @@ async def test():
     for p in prediction:
         del p["_id"]
 
-    print(now - timedelta(seconds=1))
+    print(now - timedelta(seconds=LENGTH_DATA_IN_SECONDS))
     print(now)
     return {"data": result, "prediction": prediction}
     # return extended_data.to_dict()
@@ -235,13 +236,14 @@ async def websocket_endpoint(websocket: WebSocket):
         now = parser.parse(SIMULATE_DATETIME) # Date for simulation purposes
         if SIMULATE_REALTIME:
             now = datetime.now(tz=timezone.utc) - timedelta(
-                seconds = int(MSEED_RANGE_IN_SECONDS)
+                seconds = MSEED_RANGE_IN_SECONDS # Realtime delay from seedlink
             )
         while True:
             start = time.monotonic_ns()
+            # Query LENGTH_DATA_IN_SECONDS worth of data
             query = f"""
             from(bucket: "eews") 
-                |> range(start: {(now - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")}, stop: {now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")}) 
+                |> range(start: {(now - timedelta(seconds=LENGTH_DATA_IN_SECONDS)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")}, stop: {now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")}) 
                 |> filter(fn: (r) => r["_measurement"] == "p_arrival" or r["_measurement"] == "seismograf")"""
             data: TableList = query_api.query(query=query)
             result = {}
@@ -276,7 +278,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await db["prediction"]
                 .find(
                     {
-                        "p-arrival": {"$lte": now - timedelta(seconds=1)},
+                        "p-arrival": {"$lte": now - timedelta(seconds=LENGTH_DATA_IN_SECONDS)},
                         "expired": {"$gte": now},
                     }
                 )
@@ -288,10 +290,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 del p["expired"]
 
             json_data = json.dumps({"data": result, "prediction": prediction})
-            now += timedelta(seconds=1)
+            now += timedelta(seconds=LENGTH_DATA_IN_SECONDS)
             await manager.broadcast(json_data)
             diff = (time.monotonic_ns() - start) / 10**9
-            await asyncio.sleep(1 - diff)
+            await asyncio.sleep(LENGTH_DATA_IN_SECONDS - diff)
     except Exception as e:
         log.error(e)
         log.warning(f"Client {websocket} has been disconnected")
